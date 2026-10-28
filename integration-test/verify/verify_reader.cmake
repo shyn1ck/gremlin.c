@@ -51,6 +51,22 @@ list(APPEND _fcts
     gremlin_skip_data gremlin_fixed32_decode gremlin_fixed64_decode
     gremlin_unzigzag32 gremlin_unzigzag64 gremlin_f32_from_bits
     gremlin_f64_from_bits)
+if(SHARDS)
+    set(_all ${_fcts})
+    set(_fcts)
+    set(_k 0)
+    foreach(_f IN LISTS _all)
+        math(EXPR _r "${_k} % ${SHARDS}")
+        if(_r EQUAL ${SHARD})
+            list(APPEND _fcts ${_f})
+        endif()
+        math(EXPR _k "${_k} + 1")
+    endforeach()
+    if(NOT _fcts)
+        message(STATUS "empty shard")
+        return()
+    endif()
+endif()
 string(REPLACE ";" "," _fcts_arg "${_fcts}")
 
 get_filename_component(_name "${HEADER}" NAME)
