@@ -26,8 +26,8 @@ enum ek {
 /* Measured on an M3 Pro at 4 provers, 120 s per goal. The heaviest message
  * proved, normfs's ServerResponse, has weight 21 and cost 420. A loop over a
  * repeated message carries the whole message: cost 24 proves, cost 32 has
- * goals of 75 to 180 s. A flat message of 16 int32 fields proves, one of
- * 24 times out in _size. */
+ * goals of 75 to 180 s. Field count: 16 int32 fields prove, the slowest
+ * goal at 20 s, and 24 time out in _size; 17 to 23 were not measured. */
 #define WEIGHT_MAX	21
 #define COST_MAX	420
 #define REP_COST_MAX	24
@@ -1084,6 +1084,11 @@ emit_ghosts(struct gremlinc_writer *w, struct gremlinc_espec *sp)
 		if (f->kind == EK_REP_MSG) {
 			const struct ep_msg *c = child_of(sp, f);
 			F("      if (m->%s[i]) %s((%s *)m->%s[i]);\n", fn, c->pos, c->tname, fn);
+			/* Spelled out: in a file of a few hundred messages the provers
+			 * did not unfold the sum by themselves. */
+			F("      /@ assert %s((%s *)m->%s[i]) >= 0; @/\n"
+			  "      /@ assert %s(m, i + 1) == %s(m, i) + %s((%s *)m->%s[i]); @/\n",
+			  f->term, c->tname, fn, f->sum, f->sum, f->term, c->tname, fn);
 		}
 		F("      i++;\n"
 		  "    }\n"
@@ -1118,6 +1123,10 @@ emit_ghosts(struct gremlinc_writer *w, struct gremlinc_espec *sp)
 		}
 		if (has_sum(f->kind)) F("    %s(m);\n", f->mono);
 	}
+	/* One term at a time: the whole sum at once took Z3 over a minute on
+	 * eight fields. */
+	for (size_t i = 0; i < e->nf; i++)
+		F("    /@ assert %s(m) >= 0; @/\n", e->f[i].t);
 	F("  }\n*/\n\n");
 	if (e->elem) {
 		F("/*@ ghost\n"
