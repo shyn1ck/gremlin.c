@@ -1,0 +1,74 @@
+name: wp
+on:
+  push:
+    branches: [ci/wp-shards]
+env:
+  OPAM_KEY: opam-fc32.1-ae2.6.3-ocaml4.14.2-v1
+jobs:
+  tools:
+    runs-on: ubuntu-24.04
+    steps:
+      - id: c
+        uses: actions/cache/restore@v4
+        with: { path: ~/.opam, key: "${{ env.OPAM_KEY }}", lookup-only: true }
+      - if: steps.c.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq opam libgmp-dev zlib1g-dev pkg-config libexpat1-dev
+          opam init -y --bare --disable-sandboxing -q
+          opam switch create fc 4.14.2 -y -q
+          eval $(opam env --switch fc --set-switch)
+          opam install -y -q --confirm-level=unsafe-yes frama-c.32.1 alt-ergo.2.6.3 why3.1.8.2
+          frama-c -version; alt-ergo --version; why3 --version
+      - if: steps.c.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with: { path: ~/.opam, key: "${{ env.OPAM_KEY }}" }
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      m: ${{ steps.m.outputs.m }}
+    steps:
+      - id: m
+        run: |
+          j=; add() { for i in $(seq 0 $(($3-1))); do j="$j{\"set\":\"$1\",\"side\":\"$2\",\"shard\":$i,\"shards\":$3},"; done; }
+          add fixture writer 10; add normfs writer 10
+          add unittest writer 10; add unittest reader 6
+          for s in unittest_import unittest_import_public benchmark map_test; do add $s writer 1; add $s reader 1; done
+          add whatsapp writer 20; add whatsapp reader 10
+          echo "m={\"include\":[${j%,}]}" >> $GITHUB_OUTPUT
+  prove:
+    needs: [tools, plan]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.m) }}
+    name: ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }}/${{ matrix.shards }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with: { path: ~/.opam, key: "${{ env.OPAM_KEY }}", fail-on-cache-miss: true }
+      - run: |
+          curl -sSL -o z3.zip https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/z3-4.16.0-x64-glibc-2.39.zip
+          unzip -q z3.zip -d $HOME/z3 && echo "$(dirname $(find $HOME/z3 -name z3 -type f | head -1))" >> $GITHUB_PATH
+          echo "$HOME/.opam/fc/bin" >> $GITHUB_PATH
+      - run: |
+          z3 --version; alt-ergo --version; frama-c -version
+          why3 config detect >/dev/null && why3 config list-provers
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build build -j4 --target gremlinc-gen >/dev/null
+          mkdir -p report
+          ci/prove.sh ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }} ${{ matrix.shards }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r-${{ matrix.set }}-${{ matrix.side }}-${{ matrix.shard }}
+          path: report/
+          if-no-files-found: ignore
+  summary:
+    needs: prove
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: reports }
+      - run: python3 ci/summary.py
