@@ -1,0 +1,11 @@
+name: probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    container: framac/frama-c:32.1
+    steps:
+      - run: |
+          cat /etc/os-release | head -2; ldd --version | head -1
+          frama-c -version; why3 --version; alt-ergo --version || true; z3 --version || true; cvc5 --version | head -1 || true
+          why3 config detect 2>&1 | tail -8; nproc; which cmake gcc make python3 git || true
