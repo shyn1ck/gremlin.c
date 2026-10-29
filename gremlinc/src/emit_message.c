@@ -754,8 +754,7 @@ gremlinc_emit_message_marked(struct gremlinc_writer *w,
 	}
 	W("} "); W(reader_ty); W(";\n\n");
 
-	/* Every kept span lies in src[0 .. n); the init loop holds it with
-	 * n = offset, the result with n = len. */
+	/* Every kept span lies in src[0 .. n). */
 	W("/*@ predicate "); W(reader_ok); W("{L}("); W(reader_ty);
 	W(" *r, integer n) =\n      r->src_len >= n");
 	for (size_t i = 0; i < m->fields.count; i++) {
@@ -795,8 +794,17 @@ gremlinc_emit_message_marked(struct gremlinc_writer *w,
 	W("\tsize_t offset = 0;\n");
 	W("\t/*@ loop invariant 0 <= offset <= len;\n"
 	  "\t    loop invariant r->src == src && r->src_len == len;\n"
-	  "\t    loop invariant "); W(reader_ok); W("(r, offset);\n"
-	  "\t    loop assigns offset, *r;\n"
+	  "\t    loop invariant "); W(reader_ok); W("(r, len);\n");
+	/* Each element takes at least one byte. One invariant per count: a
+	 * single sum of them stalled the provers on wide messages. */
+	for (size_t i = 0; i < m->fields.count; i++) {
+		const struct gremlind_field *fld = &m->fields.items[i];
+		if (field_is_repeated_bytes(fld) || field_is_repeated_msg(fld) ||
+		    field_is_map(fld) || field_is_repeated_scalar(fld)) {
+			W("\t    loop invariant r->"); W(fnames[i]); W("_count <= offset;\n");
+		}
+	}
+	W("\t    loop assigns offset, *r;\n"
 	  "\t    loop variant len - offset;\n"
 	  "\t*/\n");
 	W("\twhile (offset < len) {\n");

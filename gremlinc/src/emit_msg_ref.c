@@ -97,7 +97,11 @@ gremlinc_msg_ref_emit_reader_arm(struct gremlinc_writer *w,
 	  "\t\t\t\tgremlin_bytes_decode(src + offset, len - offset);\n"
 	  "\t\t\tif (d.error != GREMLIN_OK) return d.error;\n"
 	  "\t\t\toffset += d.consumed;\n"
-	  "\t\t\tr->"); W(fname); W(" = d.bytes;\n");
+	  "\t\t\t/*@ assert gremlin_span_in(d.bytes, (uint8_t *)src, len); */\n");
+	/* Field by field: WP models a struct store as a copy, and every
+	 * other span of reader_ok then has to be framed through it. */
+	W("\t\t\tr->"); W(fname); W(".data = d.bytes.data;\n"
+	  "\t\t\tr->"); W(fname); W(".len = d.bytes.len;\n");
 	W("\t\t\tr->_has."); W(fname); W(" = 1;\n");
 	W("\t\t\tcontinue;\n\t\t}\n");
 	return GREMLINP_OK;
