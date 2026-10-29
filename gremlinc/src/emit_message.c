@@ -79,6 +79,34 @@ field_is_repeated_scalar(const struct gremlind_field *f)
 				      f->type.u.builtin.length) != NULL;
 }
 
+static bool
+field_has_count(const struct gremlind_field *f)
+{
+	return field_is_repeated_bytes(f) || field_is_repeated_msg(f) ||
+	       field_is_map(f) || field_is_repeated_scalar(f);
+}
+
+static bool
+field_has_span(const struct gremlind_field *f)
+{
+	return !field_has_count(f) &&
+	       (field_is_bytes(f) || f->type.kind == GREMLIND_TYPE_REF_MESSAGE);
+}
+
+static enum gremlinp_parsing_error
+emit_span_clauses(struct gremlinc_writer *w, const struct gremlind_message *m,
+		  const char *const *fnames)
+{
+	enum gremlinp_parsing_error err;
+	for (size_t i = 0; i < m->fields.count; i++) {
+		if (!field_has_span(&m->fields.items[i])) continue;
+		W(" &&\n      (r->_has."); W(fnames[i]);
+		W(" ==> gremlin_span_in(r->"); W(fnames[i]);
+		W(", (uint8_t *)r->src, n))");
+	}
+	return GREMLINP_OK;
+}
+
 static enum gremlinp_parsing_error
 dispatch_size_field(struct gremlinc_writer *w,
 		    struct gremlind_arena *arena,
@@ -470,6 +498,13 @@ gremlinc_emit_message_marked(struct gremlinc_writer *w,
 	if (!size_fn || !encode_fn || !reader_ty || !reader_init_fn || !reader_ok) {
 		return GREMLINP_ERROR_OUT_OF_MEMORY;
 	}
+	bool counted = false;
+	for (size_t i = 0; i < m->fields.count; i++)
+		counted = counted || field_has_count(&m->fields.items[i]);
+	const char *reader_spans = NULL;
+	if (counted &&
+	    (reader_spans = gremlinc_claim_avoiding(scope, reserved, reader_ty, "_spans")) == NULL)
+		return GREMLINP_ERROR_OUT_OF_MEMORY;
 	/* Kept for the contracts of messages that hold this one. */
 	m->c_reader_ok = reader_ok;
 
@@ -754,22 +789,26 @@ gremlinc_emit_message_marked(struct gremlinc_writer *w,
 	}
 	W("} "); W(reader_ty); W(";\n\n");
 
-	/* Every kept span lies in src[0 .. n). */
-	W("/*@ predicate "); W(reader_ok); W("{L}("); W(reader_ty);
-	W(" *r, integer n) =\n      r->src_len >= n");
+	/* Every kept span lies in src[0 .. n). With counts the spans get a
+	 * predicate of their own, which is all init's loop carries. */
+	if (reader_spans != NULL) {
+		W("/*@ predicate "); W(reader_spans); W("{L}("); W(reader_ty);
+		W(" *r, integer n) =\n      r->src_len >= n");
+		if ((err = emit_span_clauses(w, m, fnames)) != GREMLINP_OK) return err;
+		W(";\n*/\n\n");
+	}
+	W("/*@ predicate "); W(reader_ok); W("{L}("); W(reader_ty); W(" *r, integer n) =\n      ");
+	if (reader_spans != NULL) {
+		W(reader_spans); W("(r, n)");
+	} else {
+		W("r->src_len >= n");
+		if ((err = emit_span_clauses(w, m, fnames)) != GREMLINP_OK) return err;
+	}
 	for (size_t i = 0; i < m->fields.count; i++) {
-		const struct gremlind_field *fld = &m->fields.items[i];
-		if (field_is_repeated_bytes(fld) || field_is_repeated_msg(fld) ||
-		    field_is_map(fld) || field_is_repeated_scalar(fld)) {
-			W(" &&\n      r->"); W(fnames[i]); W("_count <= n &&\n      (r->");
-			W(fnames[i]); W("_count > 0 ==> r->"); W(fnames[i]);
-			W("_first_offset < n)");
-		} else if (field_is_bytes(fld) ||
-			   fld->type.kind == GREMLIND_TYPE_REF_MESSAGE) {
-			W(" &&\n      (r->_has."); W(fnames[i]);
-			W(" ==> gremlin_span_in(r->"); W(fnames[i]);
-			W(", (uint8_t *)r->src, n))");
-		}
+		if (!field_has_count(&m->fields.items[i])) continue;
+		W(" &&\n      r->"); W(fnames[i]); W("_count <= n &&\n      (r->");
+		W(fnames[i]); W("_count > 0 ==> r->"); W(fnames[i]);
+		W("_first_offset < n)");
 	}
 	W(";\n*/\n\n");
 	if (decl_end != NULL) *decl_end = w->offset;
@@ -794,15 +833,14 @@ gremlinc_emit_message_marked(struct gremlinc_writer *w,
 	W("\tsize_t offset = 0;\n");
 	W("\t/*@ loop invariant 0 <= offset <= len;\n"
 	  "\t    loop invariant r->src == src && r->src_len == len;\n"
-	  "\t    loop invariant "); W(reader_ok); W("(r, len);\n");
-	/* Each element takes at least one byte. One invariant per count: a
-	 * single sum of them stalled the provers on wide messages. */
+	  "\t    loop invariant "); W(reader_spans != NULL ? reader_spans : reader_ok);
+	W("(r, len);\n");
+	/* Each element takes at least one byte. One invariant per count:
+	 * folded into one predicate they stalled the provers. */
 	for (size_t i = 0; i < m->fields.count; i++) {
-		const struct gremlind_field *fld = &m->fields.items[i];
-		if (field_is_repeated_bytes(fld) || field_is_repeated_msg(fld) ||
-		    field_is_map(fld) || field_is_repeated_scalar(fld)) {
-			W("\t    loop invariant r->"); W(fnames[i]); W("_count <= offset;\n");
-		}
+		if (!field_has_count(&m->fields.items[i])) continue;
+		W("\t    loop invariant r->"); W(fnames[i]); W("_count <= offset && (r->");
+		W(fnames[i]); W("_count > 0 ==> r->"); W(fnames[i]); W("_first_offset < offset);\n");
 	}
 	W("\t    loop assigns offset, *r;\n"
 	  "\t    loop variant len - offset;\n"
