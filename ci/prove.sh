@@ -1,7 +1,7 @@
 #!/bin/bash
 # ci/prove.sh <set> <writer|reader> <shard> <shards>
 set -u
-set_name=$1; side=$2; shard=$3; shards=$4
+set_name=$1; side=$2; shard=$3; shards=$4; sub=${5:-0}; subs=${6:-0}
 root=$PWD; G=$root/build/gremlinc-gen/gremlinc-gen; O=$root/out/$set_name; mkdir -p $O
 X=
 case $set_name in
@@ -11,5 +11,5 @@ normfs)  $G -R ci -o $O normfs.proto; H=$O/normfs.pb.h;;
 *)       (cd descriptors/tests/proto_corpus && $G -R . -o $O $(find . -name '*.proto' | sed 's|^\./||' | sort)); H=$O/$set_name.pb.h;;
 esac
 cmake -DFRAMAC=$(command -v frama-c) -DHEADER=$H -DRUNTIME_INCLUDE=$root/runtime/include \
-  -DREPORT=$root/report/$set_name-$side-$shard.json -DSHARD=$shard -DSHARDS=$shards $X \
+  -DREPORT=$root/report/$set_name-$side-$shard-$sub.json -DSHARD=$shard -DSHARDS=$shards -DSUB=$sub -DSUBS=$subs $X \
   -P integration-test/verify/verify_$side.cmake

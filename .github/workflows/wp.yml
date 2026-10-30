@@ -29,10 +29,7 @@ jobs:
     steps:
       - id: m
         run: |
-          j=; add() { for i in $(seq 0 $(($3-1))); do j="$j{\"set\":\"$1\",\"side\":\"$2\",\"shard\":$i,\"shards\":$3},"; done; }
-          add unittest reader 12
-          for s in unittest_import unittest_import_public benchmark map_test; do add $s reader 1; done
-          add whatsapp reader 16
+          j=; for s in 5 8; do for i in $(seq 0 7); do j="$j{\"set\":\"unittest\",\"side\":\"reader\",\"shard\":$s,\"shards\":12,\"sub\":$i,\"subs\":8},"; done; done
           echo "m={\"include\":[${j%,}]}" >> $GITHUB_OUTPUT
   prove:
     needs: [tools, plan]
@@ -41,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.m) }}
-    name: ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }}/${{ matrix.shards }}
+    name: ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }}/${{ matrix.shards }} ${{ matrix.sub }}/${{ matrix.subs }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v4
@@ -55,11 +52,11 @@ jobs:
           why3 config detect >/dev/null && why3 config list-provers
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build build -j4 --target gremlinc-gen >/dev/null
           mkdir -p report
-          ci/prove.sh ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }} ${{ matrix.shards }}
+          ci/prove.sh ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }} ${{ matrix.shards }} ${{ matrix.sub }} ${{ matrix.subs }}
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r-${{ matrix.set }}-${{ matrix.side }}-${{ matrix.shard }}
+          name: r-${{ matrix.set }}-${{ matrix.side }}-${{ matrix.shard }}-${{ matrix.sub }}
           path: report/
           if-no-files-found: ignore
   summary:

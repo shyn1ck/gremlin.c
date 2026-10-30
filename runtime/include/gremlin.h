@@ -1029,6 +1029,8 @@ gremlin_bytes_decode(const uint8_t *buf, size_t len)
 static inline __attribute__((always_inline)) struct gremlin_bytes_decode_result
 gremlin_bytes_decode_at(const uint8_t *src, size_t off, size_t len)
 {
+	/* src may be NULL when len is 0, and NULL + 0 is undefined. */
+	if (off == len) return gremlin_bytes_decode(src, 0);
 	return gremlin_bytes_decode(src + off, len - off);
 }
 
