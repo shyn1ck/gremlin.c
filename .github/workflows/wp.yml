@@ -29,7 +29,11 @@ jobs:
     steps:
       - id: m
         run: |
-          j=; for s in 5 8; do for i in $(seq 0 7); do j="$j{\"set\":\"unittest\",\"side\":\"reader\",\"shard\":$s,\"shards\":12,\"sub\":$i,\"subs\":8},"; done; done
+          u='"set":"unittest","side":"reader","shards":12,"subs":8'
+          x=protobuf_unittest_TestAllTypes_reader_init,protobuf_unittest_TestAllExtensions_reader_init
+          j="{$u,\"shard\":5,\"sub\":0,\"exclude\":\"$x\",\"fct\":\"\",\"pidx\":0,\"np\":0},{$u,\"shard\":8,\"sub\":6,\"exclude\":\"$x\",\"fct\":\"\",\"pidx\":0,\"np\":0},"
+          for f in TestAllTypes:34 TestAllExtensions:35; do for i in $(seq 0 $((${f#*:} - 1))); do
+            j="$j{$u,\"shard\":0,\"sub\":0,\"exclude\":\"\",\"fct\":\"protobuf_unittest_${f%:*}_reader_init\",\"pidx\":$i,\"np\":${f#*:}},"; done; done
           echo "m={\"include\":[${j%,}]}" >> $GITHUB_OUTPUT
   prove:
     needs: [tools, plan]
@@ -38,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.m) }}
-    name: ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }}/${{ matrix.shards }} ${{ matrix.sub }}/${{ matrix.subs }}
+    name: ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.fct && format('{0} p{1}', matrix.fct, matrix.pidx) || format('{0}/{1} {2}/{3}', matrix.shard, matrix.shards, matrix.sub, matrix.subs) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v4
@@ -52,11 +56,11 @@ jobs:
           why3 config detect >/dev/null && why3 config list-provers
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build build -j4 --target gremlinc-gen >/dev/null
           mkdir -p report
-          ci/prove.sh ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }} ${{ matrix.shards }} ${{ matrix.sub }} ${{ matrix.subs }}
+          FCT=${{ matrix.fct }} PIDX=${{ matrix.pidx }} NP=${{ matrix.np }} EXCLUDE=${{ matrix.exclude }} ci/prove.sh ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }} ${{ matrix.shards }} ${{ matrix.sub }} ${{ matrix.subs }}
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r-${{ matrix.set }}-${{ matrix.side }}-${{ matrix.shard }}-${{ matrix.sub }}
+          name: r-${{ matrix.set }}-${{ matrix.side }}-${{ matrix.shard }}-${{ matrix.sub }}-${{ matrix.fct }}-${{ matrix.pidx }}
           path: report/
           if-no-files-found: ignore
   summary:

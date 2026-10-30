@@ -1,7 +1,7 @@
 import json, glob, os, re, collections
 tot = collections.defaultdict(lambda: [0, 0, 0.0, '', []])
 for f in sorted(glob.glob('reports/**/*.json*', recursive=True)):
-    m = re.search(r'([A-Za-z0-9_]+)-(writer|reader)-\d+\.json(\.lemmas)?$', f)
+    m = re.search(r'([A-Za-z0-9_]+)-(writer|reader)-[A-Za-z0-9_-]+\.json(\.lemmas)?$', f)
     if not m: continue
     k = m.group(1) + ' ' + m.group(2)
     for e in json.load(open(f)):

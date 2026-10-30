@@ -79,6 +79,18 @@ if(SHARDS)
         return()
     endif()
 endif()
+# CI: one wide function proved per -wp-prop selection, or the rest without it.
+if(FCT)
+    set(_fcts ${FCT})
+endif()
+if(EXCLUDE)
+    string(REPLACE "," ";" _ex "${EXCLUDE}")
+    list(REMOVE_ITEM _fcts ${_ex})
+endif()
+set(_prop)
+if(PROPS)
+    set(_prop "-wp-prop=${PROPS}")
+endif()
 string(REPLACE ";" "," _fcts_arg "${_fcts}")
 
 get_filename_component(_name "${HEADER}" NAME)
@@ -121,6 +133,7 @@ execute_process(
         -cpp-extra-args=${_cpp}
         -wp-report-json ${REPORT}
         -wp-fct ${_fcts_arg}
+        ${_prop}
         ${_drive}
     RESULT_VARIABLE _rc)
 if(NOT _rc EQUAL 0)
