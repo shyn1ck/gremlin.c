@@ -1821,7 +1821,7 @@ gremlinc_espec_size_field_after(struct gremlinc_writer *w, const struct gremlinc
 		}
 	}
 	F("\t/*@ assert s == \\at(s, _A%zu) + \\at(%s(m), Pre); */\n", fi, f->t);
-	F("\t/*@ ghost _A%zu: ; */\n", fi + 1);
+	if (fi + 1 < e->nf) F("\t/*@ ghost _A%zu: ; */\n", fi + 1);
 	return GREMLINP_OK;
 }
 
@@ -1922,7 +1922,8 @@ encode_room(struct gremlinc_writer *w, const struct gremlinc_espec *sp, size_t f
 	for (size_t j = fi; j < e->nf; j++)
 		F(" + \\at(%s(m), Pre)", e->f[j].t);
 	F(" == \\at(_off, Pre) + \\at(m->_size, Pre); */\n");
-	F("\t/*@ assert _off + \\at(%s(m), Pre) <= \\at(_off, Pre) + \\at(m->_size, Pre); */\n", f->t);
+	if (fi + 1 < e->nf)
+		F("\t/*@ assert _off + \\at(%s(m), Pre) <= \\at(_off, Pre) + \\at(m->_size, Pre); */\n", f->t);
 	if (f->kind != EK_MSG) return GREMLINP_OK;
 	const struct ep_msg *c = child_of(sp, f);
 	F("\t/*@ assert m->%s != \\null ==> %s((%s *)m->%s) && %s((%s *)m->%s); */\n",
@@ -1959,7 +1960,7 @@ gremlinc_espec_encode_field_after(struct gremlinc_writer *w, const struct gremli
 	enum gremlinp_parsing_error err;
 	if (sp == NULL) return GREMLINP_OK;
 	F("\t/*@ assert _off == \\at(_off, _A%zu) + \\at(%s(m), Pre); */\n", fi, sp->e->f[fi].t);
-	F("\t/*@ ghost _A%zu: ; */\n", fi + 1);
+	if (fi + 1 < sp->e->nf) F("\t/*@ ghost _A%zu: ; */\n", fi + 1);
 	return GREMLINP_OK;
 }
 
