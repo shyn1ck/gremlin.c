@@ -93,16 +93,28 @@ field_has_span(const struct gremlind_field *f)
 	       (field_is_bytes(f) || f->type.kind == GREMLIND_TYPE_REF_MESSAGE);
 }
 
+/* Spans per predicate. One predicate over every span of a wide message took
+ * the provers past the timeout; framing a store is cheap only a few at a time. */
+#define SPANS_PER_PRED 8
+
+/* Emits group `g` of `ng`, spans balanced between the groups. */
 static enum gremlinp_parsing_error
 emit_span_clauses(struct gremlinc_writer *w, const struct gremlind_message *m,
-		  const char *const *fnames)
+		  const char *const *fnames, size_t g, size_t ng, size_t nspans)
 {
 	enum gremlinp_parsing_error err;
+	size_t lo = g * (nspans / ng) + (g < nspans % ng ? g : nspans % ng);
+	size_t hi = lo + nspans / ng + (g < nspans % ng);
+	size_t k = 0;
 	for (size_t i = 0; i < m->fields.count; i++) {
 		if (!field_has_span(&m->fields.items[i])) continue;
-		W(" &&\n      (r->_has."); W(fnames[i]);
-		W(" ==> gremlin_span_in(r->"); W(fnames[i]);
-		W(", (uint8_t *)r->src, n))");
+		if (k >= lo && k < hi) {
+			if (k > lo) W(" &&\n      ");
+			W("(r->_has."); W(fnames[i]);
+			W(" ==> gremlin_span_at((uint8_t *)r->"); W(fnames[i]);
+			W(".data, r->"); W(fnames[i]); W(".len, s, n))");
+		}
+		k++;
 	}
 	return GREMLINP_OK;
 }
@@ -498,13 +510,22 @@ gremlinc_emit_message_marked(struct gremlinc_writer *w,
 	if (!size_fn || !encode_fn || !reader_ty || !reader_init_fn || !reader_ok) {
 		return GREMLINP_ERROR_OUT_OF_MEMORY;
 	}
-	bool counted = false;
+	size_t nspans = 0;
 	for (size_t i = 0; i < m->fields.count; i++)
-		counted = counted || field_has_count(&m->fields.items[i]);
-	const char *reader_spans = NULL;
-	if (counted &&
-	    (reader_spans = gremlinc_claim_avoiding(scope, reserved, reader_ty, "_spans")) == NULL)
-		return GREMLINP_ERROR_OUT_OF_MEMORY;
+		nspans += field_has_span(&m->fields.items[i]);
+	size_t ngroups = (nspans + SPANS_PER_PRED - 1) / SPANS_PER_PRED;
+	const char **spans_preds = NULL;
+	if (ngroups > 0) {
+		spans_preds = gremlind_arena_alloc(scope->arena, ngroups * sizeof *spans_preds);
+		if (spans_preds == NULL) return GREMLINP_ERROR_OUT_OF_MEMORY;
+	}
+	for (size_t g = 0; g < ngroups; g++) {
+		char suffix[32];
+		if (ngroups == 1) snprintf(suffix, sizeof suffix, "_spans");
+		else snprintf(suffix, sizeof suffix, "_spans_%zu", g);
+		spans_preds[g] = gremlinc_claim_avoiding(scope, reserved, reader_ty, suffix);
+		if (spans_preds[g] == NULL) return GREMLINP_ERROR_OUT_OF_MEMORY;
+	}
 	/* Kept for the contracts of messages that hold this one. */
 	m->c_reader_ok = reader_ok;
 
@@ -789,20 +810,19 @@ gremlinc_emit_message_marked(struct gremlinc_writer *w,
 	}
 	W("} "); W(reader_ty); W(";\n\n");
 
-	/* Every kept span lies in src[0 .. n). With counts the spans get a
-	 * predicate of their own, which is all init's loop carries. */
-	if (reader_spans != NULL) {
-		W("/*@ predicate "); W(reader_spans); W("{L}("); W(reader_ty);
-		W(" *r, integer n) =\n      r->src_len >= n");
-		if ((err = emit_span_clauses(w, m, fnames)) != GREMLINP_OK) return err;
+	/* Every kept span lies in s[0 .. n). Init's loop carries the groups with
+	 * `src` itself, so a store to `r` does not have to be framed for `r->src`. */
+	for (size_t g = 0; g < ngroups; g++) {
+		W("/*@ predicate "); W(spans_preds[g]); W("{L}("); W(reader_ty);
+		W(" *r, uint8_t *s, integer n) =\n      ");
+		if ((err = emit_span_clauses(w, m, fnames, g, ngroups, nspans)) != GREMLINP_OK)
+			return err;
 		W(";\n*/\n\n");
 	}
 	W("/*@ predicate "); W(reader_ok); W("{L}("); W(reader_ty); W(" *r, integer n) =\n      ");
-	if (reader_spans != NULL) {
-		W(reader_spans); W("(r, n)");
-	} else {
-		W("r->src_len >= n");
-		if ((err = emit_span_clauses(w, m, fnames)) != GREMLINP_OK) return err;
+	W("r->src_len >= n");
+	for (size_t g = 0; g < ngroups; g++) {
+		W(" &&\n      "); W(spans_preds[g]); W("(r, (uint8_t *)r->src, n)");
 	}
 	for (size_t i = 0; i < m->fields.count; i++) {
 		if (!field_has_count(&m->fields.items[i])) continue;
@@ -832,9 +852,10 @@ gremlinc_emit_message_marked(struct gremlinc_writer *w,
 	W("\t*r = ("); W(reader_ty); W("){ .src = src, .src_len = len };\n");
 	W("\tsize_t offset = 0;\n");
 	W("\t/*@ loop invariant 0 <= offset <= len;\n"
-	  "\t    loop invariant r->src == src && r->src_len == len;\n"
-	  "\t    loop invariant "); W(reader_spans != NULL ? reader_spans : reader_ok);
-	W("(r, len);\n");
+	  "\t    loop invariant r->src == src && r->src_len == len;\n");
+	for (size_t g = 0; g < ngroups; g++) {
+		W("\t    loop invariant "); W(spans_preds[g]); W("(r, (uint8_t *)src, len);\n");
+	}
 	/* Each element takes at least one byte. One invariant per count:
 	 * folded into one predicate they stalled the provers. */
 	for (size_t i = 0; i < m->fields.count; i++) {

@@ -30,7 +30,7 @@ jobs:
       - id: m
         run: |
           j=; add() { for i in $(seq 0 $(($3-1))); do j="$j{\"set\":\"$1\",\"side\":\"$2\",\"shard\":$i,\"shards\":$3},"; done; }
-          add unittest reader 8
+          add unittest reader 12
           for s in unittest_import unittest_import_public benchmark map_test; do add $s reader 1; done
           add whatsapp reader 16
           echo "m={\"include\":[${j%,}]}" >> $GITHUB_OUTPUT
