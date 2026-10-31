@@ -30,7 +30,10 @@ jobs:
       - id: m
         run: |
           j=; sub() { for k in $(seq 0 $(($4-1))); do j="$j{\"set\":\"$1\",\"side\":\"writer\",\"shard\":$2,\"shards\":$3,\"sub\":$k,\"subs\":$4},"; done; }
-          sub fixture 11 20 3; sub whatsapp 33 60 8
+          for i in $(seq 0 19); do sub fixture $i 20 1; done; for i in $(seq 0 9); do sub normfs $i 10 1; done
+          for i in $(seq 0 19); do sub unittest $i 20 1; done
+          for s in unittest_import unittest_import_public benchmark map_test; do sub $s 0 1 1; done
+          for i in $(seq 0 59); do sub whatsapp $i 60 1; done
           echo "m={\"include\":[${j%,}]}" >> $GITHUB_OUTPUT
   prove:
     needs: [tools, plan]
