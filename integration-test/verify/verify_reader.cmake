@@ -51,6 +51,46 @@ list(APPEND _fcts
     gremlin_skip_data gremlin_fixed32_decode gremlin_fixed64_decode
     gremlin_unzigzag32 gremlin_unzigzag64 gremlin_f32_from_bits
     gremlin_f64_from_bits)
+if(SHARDS)
+    set(_all ${_fcts})
+    set(_fcts)
+    set(_k 0)
+    foreach(_f IN LISTS _all)
+        math(EXPR _r "${_k} % ${SHARDS}")
+        if(_r EQUAL ${SHARD})
+            list(APPEND _fcts ${_f})
+        endif()
+        math(EXPR _k "${_k} + 1")
+    endforeach()
+    if(SUBS)
+        set(_all ${_fcts})
+        set(_fcts)
+        set(_k 0)
+        foreach(_f IN LISTS _all)
+            math(EXPR _r "${_k} % ${SUBS}")
+            if(_r EQUAL ${SUB})
+                list(APPEND _fcts ${_f})
+            endif()
+            math(EXPR _k "${_k} + 1")
+        endforeach()
+    endif()
+    if(NOT _fcts)
+        message(STATUS "empty shard")
+        return()
+    endif()
+endif()
+# CI: one wide function proved per -wp-prop selection, or the rest without it.
+if(FCT)
+    set(_fcts ${FCT})
+endif()
+if(EXCLUDE)
+    string(REPLACE "," ";" _ex "${EXCLUDE}")
+    list(REMOVE_ITEM _fcts ${_ex})
+endif()
+set(_prop)
+if(PROPS)
+    set(_prop "-wp-prop=${PROPS}")
+endif()
 string(REPLACE ";" "," _fcts_arg "${_fcts}")
 
 get_filename_component(_name "${HEADER}" NAME)
@@ -93,6 +133,7 @@ execute_process(
         -cpp-extra-args=${_cpp}
         -wp-report-json ${REPORT}
         -wp-fct ${_fcts_arg}
+        ${_prop}
         ${_drive}
     RESULT_VARIABLE _rc)
 if(NOT _rc EQUAL 0)

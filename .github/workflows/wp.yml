@@ -1,0 +1,82 @@
+name: wp
+on:
+  push:
+    branches: [ci/wp-combined]
+env:
+  OPAM_KEY: opam-fc32.1-ae2.6.3-ocaml4.14.2-v1
+jobs:
+  tools:
+    runs-on: ubuntu-24.04
+    steps:
+      - id: c
+        uses: actions/cache/restore@v4
+        with: { path: ~/.opam, key: "${{ env.OPAM_KEY }}", lookup-only: true }
+      - if: steps.c.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -yq opam libgmp-dev zlib1g-dev pkg-config libexpat1-dev
+          opam init -y --bare --disable-sandboxing -q
+          opam switch create fc 4.14.2 -y -q
+          eval $(opam env --switch fc --set-switch)
+          opam install -y -q --confirm-level=unsafe-yes frama-c.32.1 alt-ergo.2.6.3 why3.1.8.2
+          frama-c -version; alt-ergo --version; why3 --version
+      - if: steps.c.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with: { path: ~/.opam, key: "${{ env.OPAM_KEY }}" }
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      m: ${{ steps.m.outputs.m }}
+    steps:
+      - id: m
+        run: |
+          j=; x=protobuf_unittest_TestAllTypes_reader_init,protobuf_unittest_TestAllExtensions_reader_init
+          job() { j="$j{\"set\":\"$1\",\"side\":\"$2\",\"shard\":$3,\"shards\":$4,\"sub\":$5,\"subs\":$6,\"exclude\":\"$7\",\"fct\":\"$8\",\"pidx\":$9,\"np\":${10}},"; }
+          for f in TestAllTypes:34 TestAllExtensions:35; do for i in $(seq 0 $((${f#*:} - 1))); do
+            job unittest reader 0 0 0 0 "" protobuf_unittest_${f%:*}_reader_init $i ${f#*:}; done; done
+          for i in $(seq 0 11); do
+            if [ $i = 5 ] || [ $i = 8 ]; then for k in $(seq 0 7); do job unittest reader $i 12 $k 8 $x "" 0 0; done
+            else job unittest reader $i 12 0 1 $x "" 0 0; fi; done
+          for i in $(seq 0 15); do job whatsapp reader $i 16 0 1 "" "" 0 0; done
+          for s in unittest_import unittest_import_public benchmark map_test; do job $s reader 0 1 0 1 "" "" 0 0; job $s writer 0 1 0 1 "" "" 0 0; done
+          for i in $(seq 0 19); do job fixture writer $i 20 0 1 "" "" 0 0; done
+          for i in $(seq 0 9); do job normfs writer $i 10 0 1 "" "" 0 0; done
+          for i in $(seq 0 19); do job unittest writer $i 20 0 1 "" "" 0 0; done
+          for i in $(seq 0 59); do job whatsapp writer $i 60 0 1 "" "" 0 0; done
+          echo "m={\"include\":[${j%,}]}" >> $GITHUB_OUTPUT
+  prove:
+    needs: [tools, plan]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.m) }}
+    name: ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.fct && format('{0} p{1}', matrix.fct, matrix.pidx) || format('{0}/{1} {2}/{3}', matrix.shard, matrix.shards, matrix.sub, matrix.subs) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with: { path: ~/.opam, key: "${{ env.OPAM_KEY }}", fail-on-cache-miss: true }
+      - run: |
+          curl -sSL -o z3.zip https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/z3-4.16.0-x64-glibc-2.39.zip
+          unzip -q z3.zip -d $HOME/z3 && echo "$(dirname $(find $HOME/z3 -name z3 -type f | head -1))" >> $GITHUB_PATH
+          echo "$HOME/.opam/fc/bin" >> $GITHUB_PATH
+      - run: |
+          z3 --version; alt-ergo --version; frama-c -version
+          why3 config detect >/dev/null && why3 config list-provers
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build build -j4 --target gremlinc-gen >/dev/null
+          mkdir -p report
+          FCT=${{ matrix.fct }} PIDX=${{ matrix.pidx }} NP=${{ matrix.np }} EXCLUDE=${{ matrix.exclude }} ci/prove.sh ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }} ${{ matrix.shards }} ${{ matrix.sub }} ${{ matrix.subs }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r-${{ matrix.set }}-${{ matrix.side }}-${{ matrix.shard }}-${{ matrix.sub }}-${{ matrix.fct }}-${{ matrix.pidx }}
+          path: report/
+          if-no-files-found: ignore
+  summary:
+    needs: prove
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: reports }
+      - run: python3 ci/summary.py
