@@ -29,10 +29,8 @@ jobs:
     steps:
       - id: m
         run: |
-          j=; add() { for i in $(seq 0 $(($3-1))); do j="$j{\"set\":\"$1\",\"side\":\"$2\",\"shard\":$i,\"shards\":$3},"; done; }
-          add fixture writer 20; add normfs writer 10; add unittest writer 20
-          for s in unittest_import unittest_import_public benchmark map_test; do add $s writer 1; done
-          add whatsapp writer 60
+          j=; sub() { for k in $(seq 0 $(($4-1))); do j="$j{\"set\":\"$1\",\"side\":\"writer\",\"shard\":$2,\"shards\":$3,\"sub\":$k,\"subs\":$4},"; done; }
+          sub fixture 11 20 3; sub whatsapp 33 60 8
           echo "m={\"include\":[${j%,}]}" >> $GITHUB_OUTPUT
   prove:
     needs: [tools, plan]
@@ -41,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.m) }}
-    name: ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }}/${{ matrix.shards }}
+    name: ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }}/${{ matrix.shards }} ${{ matrix.sub }}/${{ matrix.subs }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache/restore@v4
@@ -55,11 +53,11 @@ jobs:
           why3 config detect >/dev/null && why3 config list-provers
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build build -j4 --target gremlinc-gen >/dev/null
           mkdir -p report
-          ci/prove.sh ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }} ${{ matrix.shards }}
+          ci/prove.sh ${{ matrix.set }} ${{ matrix.side }} ${{ matrix.shard }} ${{ matrix.shards }} ${{ matrix.sub }} ${{ matrix.subs }}
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r-${{ matrix.set }}-${{ matrix.side }}-${{ matrix.shard }}
+          name: r-${{ matrix.set }}-${{ matrix.side }}-${{ matrix.shard }}-${{ matrix.sub }}
           path: report/
           if-no-files-found: ignore
   summary:
