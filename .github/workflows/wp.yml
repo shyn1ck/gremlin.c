@@ -1,7 +1,7 @@
 name: wp
 on:
   push:
-    branches: [ci/wp-combined]
+    branches: [ci/wp-combined, ci/wp-enum]
 env:
   OPAM_KEY: opam-fc32.1-ae2.6.3-ocaml4.14.2-v1
 jobs:
