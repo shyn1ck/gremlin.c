@@ -1,7 +1,7 @@
 name: wp
 on:
   push:
-    branches: [ci/wp-combined, ci/wp-enum, ci/wp-enumsum]
+    branches: [ci/wp-enumwrite]
 env:
   OPAM_KEY: opam-fc32.1-ae2.6.3-ocaml4.14.2-v1
 jobs:
@@ -31,13 +31,7 @@ jobs:
         run: |
           j=; x=protobuf_unittest_TestAllTypes_reader_init,protobuf_unittest_TestAllExtensions_reader_init
           job() { j="$j{\"set\":\"$1\",\"side\":\"$2\",\"shard\":$3,\"shards\":$4,\"sub\":$5,\"subs\":$6,\"exclude\":\"$7\",\"fct\":\"$8\",\"pidx\":$9,\"np\":${10}},"; }
-          for f in TestAllTypes:34 TestAllExtensions:35; do for i in $(seq 0 $((${f#*:} - 1))); do
-            job unittest reader 0 0 0 0 "" protobuf_unittest_${f%:*}_reader_init $i ${f#*:}; done; done
-          for i in $(seq 0 11); do
-            if [ $i = 5 ] || [ $i = 8 ]; then for k in $(seq 0 7); do job unittest reader $i 12 $k 8 $x "" 0 0; done
-            else job unittest reader $i 12 0 1 $x "" 0 0; fi; done
-          for i in $(seq 0 15); do job whatsapp reader $i 16 0 1 "" "" 0 0; done
-          for s in unittest_import unittest_import_public benchmark map_test; do job $s reader 0 1 0 1 "" "" 0 0; job $s writer 0 1 0 1 "" "" 0 0; done
+          for s in unittest_import unittest_import_public benchmark map_test; do job $s writer 0 1 0 1 "" "" 0 0; done
           for i in $(seq 0 19); do job fixture writer $i 20 0 1 "" "" 0 0; done
           for i in $(seq 0 9); do job normfs writer $i 10 0 1 "" "" 0 0; done
           for i in $(seq 0 19); do job unittest writer $i 20 0 1 "" "" 0 0; done
